@@ -1,4 +1,3 @@
-# app.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -6,7 +5,6 @@ from typing import List
 import json
 import os
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 # -----------------------------
 # FastAPI setup
@@ -27,7 +25,7 @@ app.add_middleware(
 DATA_FILE = "shl_assessments_real.json"
 
 # -----------------------------
-# Load data
+# Load SHL data (lightweight)
 # -----------------------------
 if not os.path.exists(DATA_FILE):
     raise RuntimeError("❌ shl_assessments_real.json not found")
@@ -35,14 +33,36 @@ if not os.path.exists(DATA_FILE):
 with open(DATA_FILE, "r", encoding="utf-8") as f:
     ASSESSMENTS = json.load(f)
 
-MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+# -----------------------------
+# Lazy-loaded model & embeddings
+# -----------------------------
+MODEL = None
+EMBEDDINGS = None
+TEXTS = None
 
-TEXTS = [
-    f"{a['name']} {a.get('description','')} {' '.join(a.get('test_type',[]))}"
-    for a in ASSESSMENTS
-]
+def get_model_and_embeddings():
+    """
+    Lazy-loads the sentence transformer and embeddings
+    to avoid Render OOM crashes.
+    """
+    global MODEL, EMBEDDINGS, TEXTS
 
-EMBEDDINGS = MODEL.encode(TEXTS, normalize_embeddings=True)
+    if MODEL is None:
+        from sentence_transformers import SentenceTransformer
+        MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+
+    if EMBEDDINGS is None:
+        TEXTS = [
+            f"{a['name']} {a.get('description','')} {' '.join(a.get('test_type',[]))}"
+            for a in ASSESSMENTS
+        ]
+        EMBEDDINGS = MODEL.encode(
+            TEXTS,
+            normalize_embeddings=True,
+            show_progress_bar=False
+        )
+
+    return MODEL, EMBEDDINGS
 
 # -----------------------------
 # Schemas
@@ -85,17 +105,19 @@ def health():
 # -----------------------------
 @app.post("/recommend", response_model=RecommendationResponse)
 def recommend(req: QueryRequest):
-    query_embedding = MODEL.encode(
-        [req.query], normalize_embeddings=True
+    model, embeddings = get_model_and_embeddings()
+
+    query_embedding = model.encode(
+        [req.query],
+        normalize_embeddings=True
     )[0]
 
-    scores = np.dot(EMBEDDINGS, query_embedding)
+    scores = np.dot(embeddings, query_embedding)
     top_idx = np.argsort(scores)[::-1][: req.max_results]
 
     results = []
     for i in top_idx:
         a = ASSESSMENTS[i]
-
         results.append({
             "name": a["name"],
             "url": a["url"],
