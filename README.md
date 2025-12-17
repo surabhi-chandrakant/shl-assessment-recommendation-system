@@ -1,4 +1,4 @@
-# 🎯 SHL Assessment Recommendation System (RAG-based)
+#  SHL Assessment Recommendation System (RAG-based)
 
 This repository contains a **web-based GenAI Assessment Recommendation System** built using a **Retrieval-Augmented Generation (RAG)** approach.  
 The system maps natural language hiring requirements or job descriptions to the most relevant **SHL assessments** using semantic search.
